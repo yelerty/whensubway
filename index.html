@@ -1,0 +1,180 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>가장 가까운 전철역 도착 시간</title>
+  <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/babel-standalone@7.22.10/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div id="root" class="min-h-screen bg-gray-100 flex items-center justify-center"></div>
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    function App() {
+      const [userLocation, setUserLocation] = useState(null);
+      const [nearestStation, setNearestStation] = useState(null);
+      const [arrivals, setArrivals] = useState([]);
+      const [stations, setStations] = useState([]);
+      const [error, setError] = useState(null);
+      const [loading, setLoading] = useState(false);
+
+      // XLSX 파일 로드
+      useEffect(() => {
+        fetch('/stations.xlsx') // 실제 배포 시 XLSX 파일 경로
+          .then(response => response.arrayBuffer())
+          .then(data => {
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheetName = workbook.SheetNames[0];
+            const sheet = workbook.Sheets[sheetName];
+            const json = XLSX.utils.sheet_to_json(sheet);
+            setStations(json);
+          })
+          .catch(err => setError('역 데이터를 로드하지 못했습니다.'));
+      }, []);
+
+      // 사용자 위치 가져오기
+      useEffect(() => {
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            position => {
+              setUserLocation({
+                lat: position.coords.latitude,
+                lon: position.coords.longitude
+              });
+            },
+            err => setError('위치 정보를 가져올 수 없습니다.')
+          );
+        } else {
+          setError('브라우저가 위치 정보를 지원하지 않습니다.');
+        }
+      }, []);
+
+      // Haversine 공식으로 두 지점 간 거리 계산
+      const calculateDistance = (lat1, lon1, lat2, lon2) => {
+        const R = 6371e3; // 지구 반지름 (미터)
+        const φ1 = lat1 * Math.PI / 180;
+        const φ2 = lat2 * Math.PI / 180;
+        const Δφ = (lat2 - lat1) * Math.PI / 180;
+        const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+        const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+                  Math.cos(φ1) * Math.cos(φ2) *
+                  Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c; // 거리 (미터)
+      };
+
+      // 가장 가까운 역 찾기
+      useEffect(() => {
+        if (userLocation && stations.length > 0) {
+          let nearest = null;
+          let minDistance = Infinity;
+
+          stations.forEach(station => {
+            const distance = calculateDistance(
+              userLocation.lat,
+              userLocation.lon,
+              parseFloat(station.Latitude),
+              parseFloat(station.Longitude)
+            );
+            if (distance < minDistance) {
+              minDistance = distance;
+              nearest = { ...station, distance };
+            }
+          });
+
+          setNearestStation(nearest);
+        }
+      }, [userLocation, stations]);
+
+      // 더미 도착 시간 데이터 (실제 API로 대체 가능)
+      useEffect(() => {
+        if (nearestStation) {
+          // 실제 구현에서는 서울시 열린데이터광장 API 등을 호출
+          // 예: fetch(`https://api.example.com/subway/arrivals?station=${nearestStation.StationName}&key=YOUR_API_KEY`)
+          // 더미 데이터
+          setArrivals([
+            { direction: '상행', time: '5분 후', destination: '서울역' },
+            { direction: '하행', time: '3분 후', destination: '수원역' }
+          ]);
+          setLoading(false);
+        }
+      }, [nearestStation]);
+
+      return (
+        <div className="container mx-auto p-4">
+          <h1 className="text-2xl font-bold mb-4 text-center">가장 가까운 전철역 도착 시간</h1>
+          {error && <p className="text-red-500 text-center">{error}</p>}
+          {loading && <p className="text-center">로딩 중...</p>}
+          {nearestStation ? (
+            <div className="bg-white p-6 rounded-lg shadow-md">
+              <h2 className="text-xl font-semibold mb-2">
+                {nearestStation.StationName} ({nearestStation.Line}호선)
+              </h2>
+              <p className="text-gray-600 mb-4">
+                거리: {(nearestStation.distance / 1000).toFixed(2)}km
+              </p>
+              <h3 className="text-lg font-medium mb-2">도착 시간</h3>
+              <ul>
+                {arrivals.map((arrival, index) => (
+                  <li key={index} className="mb-2">
+                    {arrival.direction}: {arrival.time} ({arrival.destination})
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="text-center">가장 가까운 역을 찾는 중...</p>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.render(<App />, document.getElementById('root'));
+  </script>
+</body>
+</html>
