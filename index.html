@@ -33,8 +33,8 @@
         // Adjust column names based on your Excel file's structure
         return jsonData.map(row => ({
           name: row['역사명'] || row['station_name'], // Adjust to your column name
-          lat: parseFloat(row['위도'] || row['latitude']),
-          lon: parseFloat(row['경도'] || row['longitude'])
+          lat: parseFloat(row['역위도'] || row['latitude']),
+          lon: parseFloat(row['역경도'] || row['longitude'])
         })).filter(station => station.name && !isNaN(station.lat) && !isNaN(station.lon));
       } catch (e) {
         console.error('Error loading Excel:', e);
